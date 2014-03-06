@@ -6,18 +6,25 @@ import com.jme3.asset.TextureKey;
 import com.jme3.cinematic.MotionPath;
 import com.jme3.cinematic.MotionPathListener;
 import com.jme3.cinematic.events.MotionEvent;
+import com.jme3.collision.CollisionResult;
+import com.jme3.collision.CollisionResults;
+import com.jme3.font.BitmapText;
 import com.jme3.input.KeyInput;
+import com.jme3.input.MouseInput;
 import com.jme3.input.controls.AnalogListener;
 import com.jme3.input.controls.KeyTrigger;
+import com.jme3.input.controls.MouseButtonTrigger;
 import com.jme3.light.DirectionalLight;
 import com.jme3.material.Material;
 import com.jme3.math.ColorRGBA;
 import com.jme3.math.FastMath;
 import com.jme3.math.Quaternion;
+import com.jme3.math.Ray;
 import com.jme3.math.Vector3f;
 import com.jme3.scene.Geometry;
 import com.jme3.scene.Node;
 import com.jme3.scene.shape.Box;
+import com.jme3.scene.shape.Sphere;
 import com.jme3.terrain.geomipmap.TerrainLodControl;
 import com.jme3.terrain.geomipmap.TerrainQuad;
 import com.jme3.terrain.heightmap.AbstractHeightMap;
@@ -49,6 +56,16 @@ public class Main extends SimpleApplication {
 		Main run = new Main();
 		run.start();
 	}
+	
+	private Node shootable;
+	private Geometry mark;
+	private Vector3f CamStartLoc = new Vector3f(2f, 2f, 25f);
+	private Vector3f CamStartLook = new Vector3f(0f, 0f, 0f);
+	Vector3f CamLoc = new Vector3f();
+	private Vector3f CamLook = new Vector3f();
+	private Vector3f CamGod = new Vector3f(0f, 150f, 0f);
+	private Vector3f CamZero = new Vector3f(0f, 0f, 0f);
+	private boolean changeCam = true;
 
 	static{
 		box4 = new Box(0.5f, 0.5f, 0.5f);
@@ -57,10 +74,12 @@ public class Main extends SimpleApplication {
 	@Override
 	public void simpleInitApp() {
 		flyCam.setMoveSpeed(30.0f);     
-		cam.setLocation(new Vector3f(2f, 2f, 25f));
-		cam.lookAt(new Vector3f(0, 0, 0), Vector3f.UNIT_Y);
+		cam.setLocation(CamStartLoc);
+		cam.lookAt(CamStartLook, Vector3f.UNIT_Y);
 		initKeys();
 		initInputs();
+		initMark();
+		initCrossHairs();
 
 		//	    viewPort.setBackgroundColor(ColorRGBA.LightGray);
 
@@ -72,12 +91,16 @@ public class Main extends SimpleApplication {
 		//       sun.setDirection(new Vector3f(-0.1f, -0.7f, -1.0f));
 		//       rootNode.addLight(sun);
 
+		shootable = new Node("Shootables");
+		rootNode.attachChild(shootable);
+		
 		/** Create a pivot node at (0,0,0) and attach it to the root node */
-		Node pivot = new Node("pivot");
-		Cubes(pivot);
-		initFloor();
+		//Node pivot = new Node("pivot");
+		//Cubes(pivot);
+		Cubes(shootable);
+		initFloor(shootable);
 		BoxTail();
-		rootNode.attachChild(pivot); // put this node in the scene
+		//rootNode.attachChild(pivot); // put this node in the scene
 
 		/* https://code.google.com/p/jmonkeyengine/source/browse/trunk/engine/src/test/jme3test/animation/TestMotionPath.java */
 
@@ -120,7 +143,7 @@ public class Main extends SimpleApplication {
 //		RunAnimation = true;
 	}
 
-	public void initFloor(){
+	public void initFloor(Node shootable){
 		/* Floor */
 		floor = new Box(100f, 0.1f, 100f);
 		Geometry floor_geo = new Geometry("Floor", floor);
@@ -133,6 +156,7 @@ public class Main extends SimpleApplication {
 		floor_geo.setMaterial(floor_mat);
 		floor_geo.setLocalTranslation(0, -1.5f, 0);
 		rootNode.attachChild(floor_geo);
+		shootable.attachChild(floor_geo);
 	}
 
 	public void Cubes(Node pivot){
@@ -198,6 +222,8 @@ public class Main extends SimpleApplication {
 		inputManager.addMapping("Left", new KeyTrigger(KeyInput.KEY_F));
 		inputManager.addMapping("Right", new KeyTrigger(KeyInput.KEY_H));
 		inputManager.addMapping("Stop", new KeyTrigger(KeyInput.KEY_G));
+		inputManager.addMapping("Switch", new KeyTrigger(KeyInput.KEY_1));
+		inputManager.addMapping("Fire", new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
 
 		ActionListener actionListener = new ActionListener() {
 			public void onAction(String name, boolean keyPressed, float tpf) {
@@ -215,10 +241,80 @@ public class Main extends SimpleApplication {
 					motionControl2.stop();
 					motionControl3.stop();
 				}
+				if (name.equals("Switch") && keyPressed){
+					if(changeCam){
+						//flyCam.setEnabled(false);
+						changeCam = false; 
+						
+						CamLoc = cam.getLocation();
+						System.out.println("CamLoc Before: " + CamLoc);
+						
+						CamLook = cam.getDirection();
+						System.out.println("CamLook Before: " + CamLook);
+						
+						cam.setLocation(CamGod);
+						cam.lookAt(CamZero, Vector3f.UNIT_Y);
+						
+					}else{
+						//flyCam.setEnabled(true);
+						changeCam = true;
+						System.out.println("CamLoc After: " + CamLoc);
+						cam.setLocation(CamLoc);
+						cam.lookAt(CamLook, Vector3f.UNIT_Y);
+					}
+				}
+				if(name.equals("Fire") && keyPressed){
+					CollisionResults results = new CollisionResults();
+					Ray ray = new Ray(cam.getLocation(), cam.getDirection());
+					shootable.collideWith(ray, results);
+
+					System.out.println("----- Collisions? " + results.size() + "-----");
+					for (int i = 0; i < results.size(); i++) {
+						// For each hit, we know distance, impact point, name of geometry.
+						float dist = results.getCollision(i).getDistance();
+						Vector3f pt = results.getCollision(i).getContactPoint();
+						String hit = results.getCollision(i).getGeometry().getName();
+						System.out.println("* Collision #" + i);
+						System.out.println("  You shot " + hit + " at " + pt + ", " + dist + " wu away.");		
+					}
+					// 5. Use the results (we mark the hit object)
+					if (results.size() > 0) {
+						// The closest collision point is what was truly hit:
+						CollisionResult closest = results.getClosestCollision();
+						// Let's interact - we mark the hit with a red dot.
+						mark.setLocalTranslation(closest.getContactPoint());
+						rootNode.attachChild(mark);
+					} else {
+						// No hits? Then remove the red mark.
+						rootNode.detachChild(mark);
+					}
+				}
 			}
 		};
 		inputManager.addListener(actionListener, "Up", "Left", "Right", "Stop");
+		inputManager.addListener(actionListener, "Fire");
+		inputManager.addListener(actionListener, "Switch");
 	}
+	
+	protected void initMark() {
+		Sphere sphere = new Sphere(30, 30, 0.2f);
+		mark = new Geometry("BOOM!", sphere);
+		Material mark_mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
+		mark_mat.setColor("Color", ColorRGBA.Red);
+		mark.setMaterial(mark_mat);
+	}
+	
+	protected void initCrossHairs() {
+		setDisplayStatView(false);
+		guiFont = assetManager.loadFont("Interface/Fonts/Default.fnt");
+		BitmapText ch = new BitmapText(guiFont, false);
+		ch.setSize(guiFont.getCharSet().getRenderedSize() * 2);
+		ch.setText("+"); // crosshairs
+		ch.setLocalTranslation( // center
+				settings.getWidth() / 2 - ch.getLineWidth()/2, settings.getHeight() / 2 + ch.getLineHeight()/2, 0);
+		guiNode.attachChild(ch);
+	}
+	
 
 	//http://hub.jmonkeyengine.org/wiki/doku.php/jme3:beginner:hello_animation
 	public void initKeys() {
@@ -230,9 +326,10 @@ public class Main extends SimpleApplication {
 		inputManager.addListener(analogListener, "Left1");
 		inputManager.addListener(analogListener, "Right1");
 		inputManager.addListener(analogListener, "Reset1");
+
 	}
 
-	//Om man vill kunna röra på cuberna med hjälp av tangentbordet.
+	//Om man vill kunna rÃ¶ra pÃ¥ cuberna med hjÃ¤lp av tangentbordet.
 	private AnalogListener analogListener = new AnalogListener() {
 	    public void onAnalog(String name, float value, float tpf) {
 	    	if (name.equals("Up1")) {
