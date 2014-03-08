@@ -3,6 +3,13 @@ package lab4;
 import com.jme3.animation.LoopMode;
 import com.jme3.app.SimpleApplication;
 import com.jme3.asset.TextureKey;
+import com.jme3.asset.plugins.ZipLocator;
+import com.jme3.bullet.BulletAppState;
+import com.jme3.bullet.collision.shapes.CapsuleCollisionShape;
+import com.jme3.bullet.collision.shapes.CollisionShape;
+import com.jme3.bullet.control.CharacterControl;
+import com.jme3.bullet.control.RigidBodyControl;
+import com.jme3.bullet.util.CollisionShapeFactory;
 import com.jme3.cinematic.MotionPath;
 import com.jme3.cinematic.MotionPathListener;
 import com.jme3.cinematic.events.MotionEvent;
@@ -14,6 +21,7 @@ import com.jme3.input.MouseInput;
 import com.jme3.input.controls.AnalogListener;
 import com.jme3.input.controls.KeyTrigger;
 import com.jme3.input.controls.MouseButtonTrigger;
+import com.jme3.light.AmbientLight;
 import com.jme3.light.DirectionalLight;
 import com.jme3.material.Material;
 import com.jme3.math.ColorRGBA;
@@ -23,6 +31,7 @@ import com.jme3.math.Ray;
 import com.jme3.math.Vector3f;
 import com.jme3.scene.Geometry;
 import com.jme3.scene.Node;
+import com.jme3.scene.Spatial;
 import com.jme3.scene.shape.Box;
 import com.jme3.scene.shape.Sphere;
 import com.jme3.terrain.geomipmap.TerrainLodControl;
@@ -35,7 +44,7 @@ import com.jme3.util.SkyFactory;
 import com.jme3.input.controls.ActionListener;
 
 
-public class Main extends SimpleApplication {
+public class Main extends SimpleApplication implements ActionListener{
 
 	Material mat_terrain;
 	Material floor_mat;
@@ -50,7 +59,16 @@ public class Main extends SimpleApplication {
 	private MotionEvent motionControl1;
 	private MotionEvent motionControl2;
 	private MotionEvent motionControl3;
-//	boolean RunAnimation;
+	
+	private Spatial sceneModel;
+	private BulletAppState bulletAppState;
+	private RigidBodyControl landscape;
+	private CharacterControl player;
+	private Vector3f walkDirection = new Vector3f();
+	private boolean left = false, right = false, up = false, down = false;
+	private Vector3f camDir = new Vector3f();
+	private Vector3f camLeft = new Vector3f();
+
 
 	public static void main(String[] args) {
 		Main run = new Main();
@@ -59,6 +77,7 @@ public class Main extends SimpleApplication {
 	
 	private Node shootable;
 	private Geometry mark;
+	
 	private Vector3f CamStartLoc = new Vector3f(2f, 2f, 25f);
 	private Vector3f CamStartLook = new Vector3f(0f, 0f, 0f);
 	Vector3f CamLoc = new Vector3f();
@@ -73,37 +92,86 @@ public class Main extends SimpleApplication {
 
 	@Override
 	public void simpleInitApp() {
-		flyCam.setMoveSpeed(30.0f);     
+
+		bulletAppState = new BulletAppState();
+		stateManager.attach(bulletAppState);
+		
+		viewPort.setBackgroundColor(new ColorRGBA(0.7f, 0.8f, 1f, 1f));
+		flyCam.setMoveSpeed(30.0f);   
+		/*
 		cam.setLocation(CamStartLoc);
 		cam.lookAt(CamStartLook, Vector3f.UNIT_Y);
-		initKeys();
+		*/
+		
+		//initKeys();
 		initInputs();
+		setUpLight();
 		initMark();
 		initCrossHairs();
 
-		//	    viewPort.setBackgroundColor(ColorRGBA.LightGray);
+		
+		assetManager.registerLocator("town.zip", ZipLocator.class);
+		sceneModel = assetManager.loadModel("main.scene");
+		//sceneModel = assetManager.loadModel("assets/Scenes/main.scene");
+		sceneModel.setLocalScale(2f);
+		
+
+		CollisionShape sceneShape =	CollisionShapeFactory.createMeshShape((Node) sceneModel);
+		landscape = new RigidBodyControl(sceneShape, 0);
+		sceneModel.addControl(landscape);
+
+		CapsuleCollisionShape capsuleShape = new CapsuleCollisionShape(1.5f, 6f, 1);
+	    player = new CharacterControl(capsuleShape, 0.05f);
+	    player.setJumpSpeed(20);
+	    player.setFallSpeed(30);
+	    player.setGravity(30);
+	    player.setPhysicsLocation(new Vector3f(0, 15, 0));
+		
+	    rootNode.attachChild(sceneModel);
+	    bulletAppState.getPhysicsSpace().add(landscape);
+	    bulletAppState.getPhysicsSpace().add(player);
+
+	    
+		shootable = new Node("Shootables");
+		rootNode.attachChild(shootable);
+		
+		Cubes(shootable);
+		//initFloor(shootable);
+		//Motions();
+			    
+//		viewPort.setBackgroundColor(ColorRGBA.LightGray);
 
 		/* Skybox */
-		rootNode.attachChild(SkyFactory.createSky(assetManager, "Textures/Sky/Bright/BrightSky.dds", false));
+		//rootNode.attachChild(SkyFactory.createSky(assetManager, "Textures/Sky/Bright/BrightSky.dds", false));
 
 		/* Sun */
 		//       DirectionalLight sun = new DirectionalLight();
 		//       sun.setDirection(new Vector3f(-0.1f, -0.7f, -1.0f));
 		//       rootNode.addLight(sun);
 
-		shootable = new Node("Shootables");
-		rootNode.attachChild(shootable);
-		
 		/** Create a pivot node at (0,0,0) and attach it to the root node */
 		//Node pivot = new Node("pivot");
 		//Cubes(pivot);
-		Cubes(shootable);
-		initFloor(shootable);
-		BoxTail();
+
 		//rootNode.attachChild(pivot); // put this node in the scene
 
-		/* https://code.google.com/p/jmonkeyengine/source/browse/trunk/engine/src/test/jme3test/animation/TestMotionPath.java */
+//		RunAnimation = true;
+	}
+	
+	private void setUpLight() {
+		// We add light so we see the scene
+		AmbientLight al = new AmbientLight();
+		al.setColor(ColorRGBA.White.mult(1.3f));
+		rootNode.addLight(al);
 
+		DirectionalLight dl = new DirectionalLight();
+		dl.setColor(ColorRGBA.White);
+		dl.setDirection(new Vector3f(2.8f, -2.8f, -2.8f).normalizeLocal());
+		rootNode.addLight(dl);
+	}
+	
+	public void Motions(){
+		/* https://code.google.com/p/jmonkeyengine/source/browse/trunk/engine/src/test/jme3test/animation/TestMotionPath.java */
 		path1 = new MotionPath();
 		path1.setCycle(true);
 		path1.addWayPoint(new Vector3f(-3, 0, 0));
@@ -139,8 +207,6 @@ public class Main extends SimpleApplication {
 		motionControl3.setDirectionType(MotionEvent.Direction.Path);
 		motionControl3.setInitialDuration(10f);
 		motionControl3.setSpeed(2f);
-
-//		RunAnimation = true;
 	}
 
 	public void initFloor(Node shootable){
@@ -158,7 +224,7 @@ public class Main extends SimpleApplication {
 		rootNode.attachChild(floor_geo);
 		shootable.attachChild(floor_geo);
 	}
-
+	
 	public void Cubes(Node pivot){
 		/* Cubes */
 		Box box1 = new Box(1, 1, 1);
@@ -197,14 +263,6 @@ public class Main extends SimpleApplication {
 		pivot.attachChild(green);
 	}
 
-	public void BoxTail(){
-		float start = 0.5f / 4;
-		for (int j = 0; j < 5; j++) {
-			Vector3f vt = new Vector3f(j * 0.5f * 4 + start, 8, 0);
-			Create_Box(vt);
-		}
-	}
-
 	public void Create_Box(Vector3f location){
 		/** Create a brick geometry and attach to scene graph. */
 		Geometry box_geo = new Geometry("box", box4);
@@ -218,15 +276,28 @@ public class Main extends SimpleApplication {
 
 	// Skapar en animation av de tre cuberna.
 	public void initInputs() {
+		/*
 		inputManager.addMapping("Up", new KeyTrigger(KeyInput.KEY_T));
 		inputManager.addMapping("Left", new KeyTrigger(KeyInput.KEY_F));
 		inputManager.addMapping("Right", new KeyTrigger(KeyInput.KEY_H));
 		inputManager.addMapping("Stop", new KeyTrigger(KeyInput.KEY_G));
 		inputManager.addMapping("Switch", new KeyTrigger(KeyInput.KEY_1));
+		*/
+	    inputManager.addMapping("Left", new KeyTrigger(KeyInput.KEY_A));
+	    inputManager.addMapping("Right", new KeyTrigger(KeyInput.KEY_D));
+	    inputManager.addMapping("Up", new KeyTrigger(KeyInput.KEY_W));
+	    inputManager.addMapping("Down", new KeyTrigger(KeyInput.KEY_S));
+	    inputManager.addMapping("Jump", new KeyTrigger(KeyInput.KEY_SPACE));
 		inputManager.addMapping("Fire", new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
-
+		inputManager.addMapping("Switch", new KeyTrigger(KeyInput.KEY_1));
+		inputManager.addListener(this, "Left", "Right", "Up", "Down", "Jump");
+		inputManager.addListener(this, "Fire");
+		inputManager.addListener(this, "Switch");
+		
+		/*
 		ActionListener actionListener = new ActionListener() {
 			public void onAction(String name, boolean keyPressed, float tpf) {
+				/*
 				if (name.equals("Up") && keyPressed) {
 					motionControl3.play();
 				}
@@ -241,59 +312,101 @@ public class Main extends SimpleApplication {
 					motionControl2.stop();
 					motionControl3.stop();
 				}
-				if (name.equals("Switch") && keyPressed){
-					if(changeCam){
-						//flyCam.setEnabled(false);
-						changeCam = false; 
-						
-						CamLoc = cam.getLocation();
-						System.out.println("CamLoc Before: " + CamLoc);
-						
-						CamLook = cam.getDirection();
-						System.out.println("CamLook Before: " + CamLook);
-						
-						cam.setLocation(CamGod);
-						cam.lookAt(CamZero, Vector3f.UNIT_Y);
-						
-					}else{
-						//flyCam.setEnabled(true);
-						changeCam = true;
-						System.out.println("CamLoc After: " + CamLoc);
-						cam.setLocation(CamLoc);
-						cam.lookAt(CamLook, Vector3f.UNIT_Y);
-					}
-				}
-				if(name.equals("Fire") && keyPressed){
-					CollisionResults results = new CollisionResults();
-					Ray ray = new Ray(cam.getLocation(), cam.getDirection());
-					shootable.collideWith(ray, results);
-
-					System.out.println("----- Collisions? " + results.size() + "-----");
-					for (int i = 0; i < results.size(); i++) {
-						// For each hit, we know distance, impact point, name of geometry.
-						float dist = results.getCollision(i).getDistance();
-						Vector3f pt = results.getCollision(i).getContactPoint();
-						String hit = results.getCollision(i).getGeometry().getName();
-						System.out.println("* Collision #" + i);
-						System.out.println("  You shot " + hit + " at " + pt + ", " + dist + " wu away.");		
-					}
-					// 5. Use the results (we mark the hit object)
-					if (results.size() > 0) {
-						// The closest collision point is what was truly hit:
-						CollisionResult closest = results.getClosestCollision();
-						// Let's interact - we mark the hit with a red dot.
-						mark.setLocalTranslation(closest.getContactPoint());
-						rootNode.attachChild(mark);
-					} else {
-						// No hits? Then remove the red mark.
-						rootNode.detachChild(mark);
-					}
-				}
 			}
 		};
-		inputManager.addListener(actionListener, "Up", "Left", "Right", "Stop");
+		
+		//inputManager.addListener(actionListener, "Up", "Left", "Right", "Stop");
 		inputManager.addListener(actionListener, "Fire");
 		inputManager.addListener(actionListener, "Switch");
+		inputManager.addListener(actionListener, "Left", "Right", "Up", "Down", "Jump");
+		*/
+	}
+	
+	public void onAction(String name, boolean keyPressed, float tpf){
+		
+		if(name.equals("Fire") && keyPressed){
+			CollisionResults results = new CollisionResults();
+			Ray ray = new Ray(cam.getLocation(), cam.getDirection());
+			shootable.collideWith(ray, results);
+
+			System.out.println("----- Collisions? " + results.size() + "-----");
+			for (int i = 0; i < results.size(); i++) {
+				// For each hit, we know distance, impact point, name of geometry.
+				float dist = results.getCollision(i).getDistance();
+				Vector3f pt = results.getCollision(i).getContactPoint();
+				String hit = results.getCollision(i).getGeometry().getName();
+				System.out.println("* Collision #" + i);
+				System.out.println("  You shot " + hit + " at " + pt + ", " + dist + " wu away.");		
+			}
+			// 5. Use the results (we mark the hit object)
+			if (results.size() > 0) {
+				// The closest collision point is what was truly hit:
+				CollisionResult closest = results.getClosestCollision();
+				// Let's interact - we mark the hit with a red dot.
+				mark.setLocalTranslation(closest.getContactPoint());
+				rootNode.attachChild(mark);
+			} else {
+				// No hits? Then remove the red mark.
+				rootNode.detachChild(mark);
+			}
+		}
+		
+		if (name.equals("Switch") && keyPressed){
+			if(changeCam){
+				//flyCam.setEnabled(false);
+				changeCam = false; 
+				
+				CamLoc = cam.getLocation();
+				System.out.println("CamLoc Before: " + CamLoc);
+				
+				CamLook = cam.getDirection();
+				System.out.println("CamLook Before: " + CamLook);
+				
+				cam.setLocation(CamGod);
+				cam.lookAt(CamZero, Vector3f.UNIT_Y);
+				
+			}else{
+				//flyCam.setEnabled(true);
+				changeCam = true;
+				System.out.println("CamLoc After: " + CamLoc);
+				cam.setLocation(CamLoc);
+				cam.lookAt(CamLook, Vector3f.UNIT_Y);
+			}
+		}
+		
+		if (name.equals("Left")){
+			left = keyPressed;
+		}else if(name.equals("Right")){
+			right = keyPressed;
+		}else if(name.equals("Up")){
+			up = keyPressed;
+		}else if(name.equals("Down")){
+			down = keyPressed;
+		}else if(name.equals("Jump")){
+			if(keyPressed){
+				player.jump();
+			}
+		}
+	}
+	
+	public void simpleUpdate(float tpf){
+		camDir.set(cam.getDirection()).multLocal(0.6f);
+		camLeft.set(cam.getLeft()).multLocal(0.4f);
+		walkDirection.set(0,0,0);
+		if(left){
+			walkDirection.addLocal(camLeft);
+		}
+		if(right){
+			walkDirection.addLocal(camLeft.negate());
+		}
+		if(up){
+			walkDirection.addLocal(camDir);
+		}
+		if(down){
+			walkDirection.addLocal(camDir.negate());
+		}
+		player.setWalkDirection(walkDirection);
+		cam.setLocation(player.getPhysicsLocation());
 	}
 	
 	protected void initMark() {
@@ -318,6 +431,7 @@ public class Main extends SimpleApplication {
 
 	//http://hub.jmonkeyengine.org/wiki/doku.php/jme3:beginner:hello_animation
 	public void initKeys() {
+		/*
 		inputManager.addMapping("Up1", new KeyTrigger(KeyInput.KEY_I));
 		inputManager.addMapping("Left1", new KeyTrigger(KeyInput.KEY_J));
 		inputManager.addMapping("Right1", new KeyTrigger(KeyInput.KEY_L));
@@ -326,9 +440,11 @@ public class Main extends SimpleApplication {
 		inputManager.addListener(analogListener, "Left1");
 		inputManager.addListener(analogListener, "Right1");
 		inputManager.addListener(analogListener, "Reset1");
+		*/
 
 	}
 
+	/*
 	//Om man vill kunna röra på cuberna med hjälp av tangentbordet.
 	private AnalogListener analogListener = new AnalogListener() {
 	    public void onAnalog(String name, float value, float tpf) {
@@ -351,18 +467,5 @@ public class Main extends SimpleApplication {
 	    	}
 	    }
 	  };
-	  
-	  /*
-		public void yellowBox(){
-			box4 = new Box(1,1,1);  
-			Geometry yellow = new Geometry("Box4", box4);
-			yellow.setLocalTranslation(new Vector3f(0,5,0));
-			Material mat4 = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
-			mat4.setColor("Color", ColorRGBA.Yellow);
-			yellow.setMaterial(mat4);
-			rootNode.attachChild(yellow);              // make the cube appear in the scene
-			pivot.attachChild(yellow);
-
-		}*/
-
+	  */
 }
